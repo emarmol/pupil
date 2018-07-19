@@ -5,17 +5,32 @@ This script shows how to talk to Pupil Capture or Pupil Service
 and run a gaze mapper calibration.
 '''
 import zmq, msgpack, time
+
+# we need a serializer
+import msgpack as serializer
+
+topic = 'notify.meta.should_doc'
+payload = msgpack.dumps({'subject':'meta.should_doc'})
+
 ctx = zmq.Context()
 
 
-#create a zmq REQ socket to talk to Pupil Service/Capture
+# create a zmq REQ socket to talk to Pupil Service/Capture
 req = ctx.socket(zmq.REQ)
 req.connect('tcp://localhost:50020')
+
+# Subscribe
+subscriber = ctx.socket(zmq.SUB)
+subscriber.connect('tcp://localhost:50020')
+subscriber.set(zmq.SUBSCRIBE, str('notify.').encode()) #receive all notification messages
+subscriber.set(zmq.SUBSCRIBE, str('logging.error').encode()) #receive logging error messages
+subscriber.set(zmq.SUBSCRIBE, str('Blink_Detection').encode()) #receive Blink Detection messages
+subscriber.set(zmq.SUBSCRIBE, str('blink').encode()) #receive blink messages
 
 
 #convenience functions
 def send_recv_notification(n):
-    # REQ REP requirese lock step communication with multipart msg (topic,msgpack_encoded dict)
+    # REQ REP requires lock step communication with multipart msg (topic,msgpack_encoded dict)
     req.send_string('notify.%s'%n['subject'], flags=zmq.SNDMORE)
     req.send(msgpack.dumps(n, use_bin_type=True))
     return req.recv_string()
@@ -23,6 +38,8 @@ def send_recv_notification(n):
 def get_pupil_timestamp():
     req.send_string('t') #see Pupil Remote Plugin for details
     return float(req.recv_string())
+
+
 
 # set start eye windows
 n = {'subject':'eye_process.should_start.0','eye_id':0, 'args':{}}
@@ -36,7 +53,7 @@ time.sleep(2)
 n = {'subject':'start_plugin','name':'HMD_Calibration', 'args':{}}
 print(send_recv_notification(n))
 
-# start caliration routine with params. This will make pupil start sampling pupil data.
+# start calibration routine with params. This will make pupil start sampling pupil data.
 n = {'subject':'calibration.should_start', 'hmd_video_frame_size':(1000,1000), 'outlier_threshold':35}
 print(send_recv_notification(n))
 
@@ -77,7 +94,21 @@ print(send_recv_notification(n))
 
 time.sleep(2)
 
-# calling blink detection plugin - TODO: fix this method call
-print('Calling blink detection plugin')
-n = {'subject': 'start_plugin', 'name': 'Blink_Detection', 'args': {}}
+
+# TODO: this causes pupil service to crash / hang
+# n = {'subject': 'start_plugin', 'name': "Blink_Detection", 'args': {}}
+# print(send_recv_notification(n))
+
+
+# set stop eye windows
+n = {'subject':'eye_process.should_stop.0','eye_id':0, 'args':{}}
 print(send_recv_notification(n))
+n = {'subject':'eye_process.should_stop.1','eye_id':1, 'args':{}}
+print(send_recv_notification(n))
+time.sleep(2)
+
+# TODO: remove while true
+while True:
+    topic,payload = subscriber.recv_multipart()
+    message = serializer.loads(payload)
+    print(topic,':',message)
